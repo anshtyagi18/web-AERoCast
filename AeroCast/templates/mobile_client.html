@@ -1,0 +1,615 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>AeroCast - Air Grab &amp; Drop</title>
+  
+  <!-- PWA & Mobile Web Meta Tags -->
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#090d16">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="AeroCast">
+  <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
+  <link rel="icon" type="image/png" href="/static/icons/icon-192.png">
+
+  <!-- Stylesheet -->
+  <link rel="stylesheet" href="/static/css/style.css">
+
+  <!-- MediaPipe Hands CDN Scripts -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+</head>
+<body>
+  <div class="container">
+    <!-- Header -->
+    <header class="header">
+      <div class="brand">
+        <div class="brand-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 2v8"></path>
+            <path d="m4.93 10.93 1.41 1.41"></path>
+            <path d="M2 18h2"></path>
+            <path d="M20 18h2"></path>
+            <path d="m19.07 10.93-1.41 1.41"></path>
+            <path d="M22 22H2"></path>
+            <path d="m8 6 4-4 4 4"></path>
+            <path d="M16 18a4 4 0 0 0-8 0"></path>
+          </svg>
+        </div>
+        <div>
+          <div class="brand-title">AeroCast</div>
+          <div class="brand-subtitle">Air Teleport PWA</div>
+        </div>
+      </div>
+      <div class="header-actions">
+        <button id="pwaInstallBtn" class="pwa-install-btn" title="Install AeroCast">
+          <span>📲</span>
+          <span>Install</span>
+        </button>
+        <div id="statusBadge" class="status-badge">
+          <span class="status-dot"></span>
+          <span id="statusText">Connecting...</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- SSL & Permissions Alert (Hidden by default) -->
+    <div id="sslAlert" class="ssl-alert">
+      <strong>⚠️ Camera Permission or SSL Notice</strong>
+      <p id="sslAlertMsg">
+        If camera preview is black or blocked, ensure you accepted the self-signed certificate:
+        Tap <b>Advanced</b> &rarr; <b>Proceed to {{ lan_ip }}</b>.
+      </p>
+      <button id="retryCameraBtn" type="button">🔄 Retry Camera</button>
+    </div>
+
+    <!-- Dynamic Guidance Bar -->
+    <div id="guidanceBar" class="guidance-bar ready">
+      <div id="guidanceIcon" class="guidance-icon">📂</div>
+      <div class="guidance-content">
+        <div id="guidanceTitle" class="guidance-title">Step 1: Choose a File</div>
+        <div id="guidanceDesc" class="guidance-desc">Select any document, photo, video, or PDF to air teleport.</div>
+      </div>
+    </div>
+
+    <!-- Transfer Banner -->
+    <div id="transferBanner" class="transfer-banner"></div>
+
+    <!-- File Picker Section -->
+    <section class="file-card" id="fileCard">
+      <input type="file" id="filePicker" class="file-picker-input" accept="*/*">
+      <label for="filePicker" class="file-picker-label" id="filePickerBtn">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+          <polyline points="17 8 12 3 7 8"></polyline>
+          <line x1="12" y1="3" x2="12" y2="15"></line>
+        </svg>
+        <span id="fileBtnLabel">Select File to Cast</span>
+      </label>
+
+      <div class="file-info" id="fileInfo" style="display: none;">
+        <div class="file-name-group">
+          <span id="fileTypeIcon">📄</span>
+          <span class="file-name" id="selectedFileName">filename.ext</span>
+        </div>
+        <span class="file-size" id="selectedFileSize">0 KB</span>
+      </div>
+    </section>
+
+    <!-- Live Vision Section -->
+    <section class="camera-card">
+      <div class="viewport-container">
+        <!-- Hidden video element for feed capture -->
+        <video id="webcamVideo" playsinline autoplay muted></video>
+        <!-- Canvas for rendering mirrored feed and hand tracking HUD -->
+        <canvas id="outputCanvas" width="640" height="480"></canvas>
+        
+        <div class="camera-overlay">
+          <div id="gesturePill" class="hud-pill">
+            <span>🖐️</span>
+            <span id="gestureLabel">Detecting Hand...</span>
+          </div>
+          <div id="cameraStatusPill" class="hud-pill">
+            <span>📷</span>
+            <span id="cameraStateLabel">Front Cam</span>
+          </div>
+        </div>
+
+        <div class="streak-indicator">
+          <div class="streak-bar-bg">
+            <div id="streakBarFill" class="streak-bar-fill"></div>
+          </div>
+          <div id="streakText" class="streak-text">Fist Grab: 0 / 5</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Interactive Instruction Steps -->
+    <section class="steps-card">
+      <div class="steps-title">Air Cast Workflow</div>
+      <div class="steps-list">
+        <div id="step1" class="step-item active">
+          <span class="step-num">1</span>
+          <span>Pick any file on your phone</span>
+        </div>
+        <div id="step2" class="step-item">
+          <span class="step-num">2</span>
+          <span>Hold a <b>Fist (✊)</b> in front of phone camera to Grab into air</span>
+        </div>
+        <div id="step3" class="step-item">
+          <span class="step-num">3</span>
+          <span>Show <b>Open Palm (✋)</b> to laptop receiver camera to Drop</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Paired Laptop Info & Reconnect -->
+    <div class="pair-info">
+      <div>Paired Host: <span id="pairedHostLabel">{{ lan_ip }}:{{ port }}</span></div>
+      <div id="pwaStatusTag">PWA Ready</div>
+    </div>
+  </div>
+
+  <script>
+    // Register PWA Service Worker
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js').then((reg) => {
+          console.log('[AeroCast SW] Registered with scope:', reg.scope);
+        }).catch((err) => {
+          console.warn('[AeroCast SW] Registration failed:', err);
+        });
+      });
+    }
+
+    // PWA Install Prompt Handling
+    let deferredInstallPrompt = null;
+    const pwaInstallBtn = document.getElementById('pwaInstallBtn');
+
+    window.addEventListener('beforeinstallprompt', (e) => {
+      e.preventDefault();
+      deferredInstallPrompt = e;
+      if (pwaInstallBtn) {
+        pwaInstallBtn.style.display = 'inline-flex';
+      }
+    });
+
+    if (pwaInstallBtn) {
+      pwaInstallBtn.addEventListener('click', async () => {
+        if (!deferredInstallPrompt) return;
+        deferredInstallPrompt.prompt();
+        const { outcome } = await deferredInstallPrompt.userChoice;
+        console.log('[PWA] User response:', outcome);
+        deferredInstallPrompt = null;
+        pwaInstallBtn.style.display = 'none';
+      });
+    }
+
+    // Remember paired host via localStorage
+    const currentHost = window.location.host;
+    if (currentHost) {
+      try {
+        localStorage.setItem('aerocast_last_host', currentHost);
+      } catch (e) {}
+    }
+
+    // State variables
+    let selectedFile = null;
+    let isFileHeld = false;
+    let isTransferring = false;
+    let fistStreak = 0;
+    const REQUIRED_STREAK = 5;
+
+    // UI Elements
+    const filePicker = document.getElementById('filePicker');
+    const fileCard = document.getElementById('fileCard');
+    const fileInfo = document.getElementById('fileInfo');
+    const selectedFileName = document.getElementById('selectedFileName');
+    const selectedFileSize = document.getElementById('selectedFileSize');
+    const fileTypeIcon = document.getElementById('fileTypeIcon');
+    const fileBtnLabel = document.getElementById('fileBtnLabel');
+    const statusBadge = document.getElementById('statusBadge');
+    const statusText = document.getElementById('statusText');
+    const guidanceBar = document.getElementById('guidanceBar');
+    const guidanceIcon = document.getElementById('guidanceIcon');
+    const guidanceTitle = document.getElementById('guidanceTitle');
+    const guidanceDesc = document.getElementById('guidanceDesc');
+    const transferBanner = document.getElementById('transferBanner');
+    const gesturePill = document.getElementById('gesturePill');
+    const gestureLabel = document.getElementById('gestureLabel');
+    const streakBarFill = document.getElementById('streakBarFill');
+    const streakText = document.getElementById('streakText');
+    const step1 = document.getElementById('step1');
+    const step2 = document.getElementById('step2');
+    const step3 = document.getElementById('step3');
+    const sslAlert = document.getElementById('sslAlert');
+    const sslAlertMsg = document.getElementById('sslAlertMsg');
+    const retryCameraBtn = document.getElementById('retryCameraBtn');
+
+    // Video & Canvas
+    const videoElement = document.getElementById('webcamVideo');
+    const canvasElement = document.getElementById('outputCanvas');
+    const canvasCtx = canvasElement.getContext('2d');
+
+    // Auto-detect WebSocket protocol: wss:// for https, ws:// for http
+    const wsProto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${wsProto}//${window.location.host}/ws`;
+    let ws = null;
+
+    function initWebSocket() {
+      try {
+        ws = new WebSocket(wsUrl);
+
+        ws.onopen = () => {
+          statusBadge.className = 'status-badge connected';
+          statusText.textContent = 'Connected';
+        };
+
+        ws.onclose = () => {
+          statusBadge.className = 'status-badge';
+          statusText.textContent = 'Reconnecting...';
+          setTimeout(initWebSocket, 2000);
+        };
+
+        ws.onerror = (err) => {
+          console.error('[WS Error]:', err);
+        };
+
+        ws.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            handleServerMessage(data);
+          } catch (e) {
+            console.error('Message parse error:', e);
+          }
+        };
+      } catch (err) {
+        console.error('WebSocket connection attempt failed:', err);
+        setTimeout(initWebSocket, 2500);
+      }
+    }
+
+    function handleServerMessage(data) {
+      console.log('[WS Recv]:', data);
+      const status = data.status;
+
+      if (status === 'FILE_HELD') {
+        isFileHeld = true;
+        setHeldUI(data.file || (selectedFile ? selectedFile.name : 'file'));
+      } else if (status === 'EXECUTE_TRANSFER') {
+        executeTransfer();
+      } else if (status === 'COMPLETED') {
+        setCompletedUI(data.file);
+      } else if (status === 'STANDBY' && !selectedFile) {
+        setStandbyUI();
+      }
+    }
+
+    // UI State Helpers
+    function setGuidance(icon, title, desc, mode) {
+      guidanceIcon.textContent = icon;
+      guidanceTitle.innerHTML = title;
+      guidanceDesc.textContent = desc;
+      guidanceBar.className = `guidance-bar ${mode}`;
+    }
+
+    function setStandbyUI() {
+      setGuidance('📂', 'Step 1: Choose a File', 'Select any document, photo, video, or PDF to air teleport.', 'ready');
+      step1.className = 'step-item active';
+      step2.className = 'step-item';
+      step3.className = 'step-item';
+      transferBanner.className = 'transfer-banner';
+      transferBanner.style.display = 'none';
+    }
+
+    function setFileSelectedUI(filename) {
+      setGuidance('✊', 'Step 2: Fist (✊) to Grab', `Hold a tight fist in front of your phone camera to grab "${filename}" into the air.`, 'held');
+      step1.className = 'step-item done';
+      step2.className = 'step-item active';
+      step3.className = 'step-item';
+    }
+
+    function setHeldUI(filename) {
+      statusBadge.className = 'status-badge held';
+      statusText.textContent = 'Held in Air';
+      setGuidance('✋', 'File Floating! Show Open Palm to Laptop', `"${filename}" is grabbed. Show an Open Palm (✋) to your laptop camera to Drop.`, 'held');
+      step1.className = 'step-item done';
+      step2.className = 'step-item done';
+      step3.className = 'step-item active';
+
+      transferBanner.className = 'transfer-banner held show';
+      transferBanner.innerHTML = `<strong>✨ "${filename}" is floating in the air!</strong><br>Show your open palm to laptop camera to drop.`;
+    }
+
+    function setCompletedUI(filename) {
+      isFileHeld = false;
+      isTransferring = false;
+      statusBadge.className = 'status-badge connected';
+      statusText.textContent = 'Transferred';
+      setGuidance('🎉', 'Air Drop Complete!', `"${filename}" was received and saved to your laptop!`, 'success');
+
+      step1.className = 'step-item done';
+      step2.className = 'step-item done';
+      step3.className = 'step-item done';
+
+      transferBanner.className = 'transfer-banner success show';
+      transferBanner.innerHTML = `<strong>✅ Teleport Complete!</strong><br>"${filename}" successfully received on laptop.`;
+
+      // Haptic celebration
+      if (navigator.vibrate) {
+        navigator.vibrate([100, 50, 100]);
+      }
+
+      // Reset file picker after 4s so user can send another file
+      setTimeout(() => {
+        filePicker.value = '';
+        selectedFile = null;
+        fileInfo.style.display = 'none';
+        fileCard.classList.remove('has-file');
+        fileBtnLabel.textContent = 'Select Another File';
+        setStandbyUI();
+      }, 4500);
+    }
+
+    function getFileIcon(filename) {
+      const ext = filename.split('.').pop().toLowerCase();
+      if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'heic'].includes(ext)) return '🖼️';
+      if (['mp4', 'mov', 'avi', 'mkv', 'webm'].includes(ext)) return '🎥';
+      if (['pdf'].includes(ext)) return '📕';
+      if (['doc', 'docx', 'txt', 'rtf', 'md'].includes(ext)) return '📝';
+      if (['zip', 'rar', '7z', 'tar', 'gz'].includes(ext)) return '📦';
+      return '📄';
+    }
+
+    // File Selection Handler
+    filePicker.addEventListener('change', (e) => {
+      if (e.target.files && e.target.files.length > 0) {
+        selectedFile = e.target.files[0];
+        selectedFileName.textContent = selectedFile.name;
+        fileTypeIcon.textContent = getFileIcon(selectedFile.name);
+
+        const sizeKB = (selectedFile.size / 1024).toFixed(1);
+        selectedFileSize.textContent = sizeKB > 1024 
+          ? `${(sizeKB / 1024).toFixed(1)} MB` 
+          : `${sizeKB} KB`;
+
+        fileCard.classList.add('has-file');
+        fileInfo.style.display = 'flex';
+        fileBtnLabel.textContent = 'Change File';
+
+        if (!isFileHeld) {
+          setFileSelectedUI(selectedFile.name);
+        }
+      }
+    });
+
+    // Execute Transfer POST call
+    async function executeTransfer() {
+      if (!selectedFile || isTransferring) return;
+
+      isTransferring = true;
+      setGuidance('⚡', 'Teleporting File...', `Sending "${selectedFile.name}" payload to laptop...`, 'held');
+      transferBanner.className = 'transfer-banner held show';
+      transferBanner.innerHTML = `<strong>⚡ Dropping "${selectedFile.name}"...</strong><br>Uploading to laptop static/received/...`;
+
+      // Haptic feedback on start
+      if (navigator.vibrate) {
+        navigator.vibrate(200);
+      }
+
+      const formData = new FormData();
+      formData.append('file', selectedFile);
+
+      try {
+        const response = await fetch('/transfer', {
+          method: 'POST',
+          body: formData
+        });
+        const resData = await response.json();
+        console.log('[Transfer response]:', resData);
+      } catch (err) {
+        console.error('Transfer failed:', err);
+        transferBanner.className = 'transfer-banner show';
+        transferBanner.style.backgroundColor = 'rgba(244, 63, 94, 0.2)';
+        transferBanner.innerHTML = `<strong>❌ Transfer Failed:</strong> ${err.message}`;
+        isTransferring = false;
+      }
+    }
+
+    // Trigger Air Grab
+    function triggerAirGrab() {
+      if (!selectedFile || isFileHeld || isTransferring) return;
+
+      console.log('[AeroCast] Triggering AIR_GRAB for:', selectedFile.name);
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+          action: 'AIR_GRAB',
+          filename: selectedFile.name
+        }));
+      }
+      isFileHeld = true;
+      setHeldUI(selectedFile.name);
+
+      // Distinct haptic pattern on air grab
+      if (navigator.vibrate) {
+        navigator.vibrate([60, 50, 90]);
+      }
+    }
+
+    // Euclidean Distance
+    function calcDist(p1, p2) {
+      return Math.hypot(p1.x - p2.x, p1.y - p2.y, (p1.z || 0) - (p2.z || 0));
+    }
+
+    // Fist Detection Logic:
+    // Compares tips 8, 12, 16, 20 distance to wrist (0) vs MCPs & PIPs
+    function isFistGesture(landmarks) {
+      const wrist = landmarks[0];
+      const fingerIndices = [
+        { tip: 8, pip: 6, mcp: 5 },    // Index
+        { tip: 12, pip: 10, mcp: 9 },  // Middle
+        { tip: 16, pip: 14, mcp: 13 }, // Ring
+        { tip: 20, pip: 18, mcp: 17 }  // Pinky
+      ];
+
+      let curledFingers = 0;
+      for (const f of fingerIndices) {
+        const tipDist = calcDist(landmarks[f.tip], wrist);
+        const pipDist = calcDist(landmarks[f.pip], wrist);
+        const mcpDist = calcDist(landmarks[f.mcp], wrist);
+
+        // A finger is curled if its tip is closer to the wrist than PIP or MCP
+        if (tipDist < pipDist || tipDist < mcpDist * 1.1) {
+          curledFingers++;
+        }
+      }
+
+      return curledFingers >= 4;
+    }
+
+    // Hand skeleton connections for HUD
+    const HAND_CONNECTIONS = [
+      [0, 1], [1, 2], [2, 3], [3, 4],
+      [0, 5], [5, 6], [6, 7], [7, 8],
+      [5, 9], [9, 10], [10, 11], [11, 12],
+      [9, 13], [13, 14], [14, 15], [15, 16],
+      [13, 17], [17, 18], [18, 19], [19, 20],
+      [0, 17]
+    ];
+
+    function drawHandHUD(landmarks, isFist) {
+      const w = canvasElement.width;
+      const h = canvasElement.height;
+
+      // Draw skeleton lines
+      canvasCtx.strokeStyle = isFist ? 'rgba(56, 189, 248, 0.9)' : 'rgba(148, 163, 184, 0.5)';
+      canvasCtx.lineWidth = 3;
+      for (const [start, end] of HAND_CONNECTIONS) {
+        const p1 = landmarks[start];
+        const p2 = landmarks[end];
+        canvasCtx.beginPath();
+        canvasCtx.moveTo(p1.x * w, p1.y * h);
+        canvasCtx.lineTo(p2.x * w, p2.y * h);
+        canvasCtx.stroke();
+      }
+
+      // Draw landmarks
+      for (let i = 0; i < landmarks.length; i++) {
+        const p = landmarks[i];
+        canvasCtx.beginPath();
+        canvasCtx.arc(p.x * w, p.y * h, (i === 8 || i === 12 || i === 16 || i === 20 || i === 0) ? 6 : 4, 0, 2 * Math.PI);
+        canvasCtx.fillStyle = isFist ? '#38bdf8' : '#94a3b8';
+        canvasCtx.fill();
+        canvasCtx.strokeStyle = '#ffffff';
+        canvasCtx.lineWidth = 1.5;
+        canvasCtx.stroke();
+      }
+    }
+
+    // MediaPipe Hands Results Callback
+    function onHandsResults(results) {
+      canvasCtx.save();
+      canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+
+      if (results.image) {
+        canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+      }
+
+      if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+        const landmarks = results.multiHandLandmarks[0];
+        const fist = isFistGesture(landmarks);
+
+        drawHandHUD(landmarks, fist);
+
+        if (fist) {
+          fistStreak = Math.min(REQUIRED_STREAK, fistStreak + 1);
+          gesturePill.className = 'hud-pill fist';
+          gestureLabel.textContent = `✊ Fist (${fistStreak}/${REQUIRED_STREAK})`;
+        } else {
+          fistStreak = Math.max(0, fistStreak - 1);
+          gesturePill.className = 'hud-pill palm';
+          gestureLabel.textContent = '✋ Open Hand';
+        }
+
+        // Update streak progress bar
+        const fillPercent = (fistStreak / REQUIRED_STREAK) * 100;
+        streakBarFill.style.width = `${fillPercent}%`;
+        streakText.textContent = `Fist Grab: ${fistStreak} / ${REQUIRED_STREAK}`;
+
+        // Trigger air grab on 5 debounced frames
+        if (fistStreak >= REQUIRED_STREAK) {
+          if (selectedFile && !isFileHeld && !isTransferring) {
+            triggerAirGrab();
+          }
+        }
+      } else {
+        fistStreak = Math.max(0, fistStreak - 1);
+        streakBarFill.style.width = `${(fistStreak / REQUIRED_STREAK) * 100}%`;
+        streakText.textContent = `Fist Grab: ${fistStreak} / ${REQUIRED_STREAK}`;
+        gesturePill.className = 'hud-pill';
+        gestureLabel.textContent = 'Searching for Hand...';
+      }
+
+      canvasCtx.restore();
+    }
+
+    // Camera & Vision Initialization
+    let cameraInstance = null;
+
+    async function setupVision() {
+      try {
+        sslAlert.style.display = 'none';
+
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          throw new Error('Camera access not supported on this origin or browser. (Requires HTTPS)');
+        }
+
+        const hands = new Hands({
+          locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+        });
+
+        hands.setOptions({
+          maxNumHands: 1,
+          modelComplexity: 1,
+          minDetectionConfidence: 0.65,
+          minTrackingConfidence: 0.65
+        });
+
+        hands.onResults(onHandsResults);
+
+        cameraInstance = new Camera(videoElement, {
+          onFrame: async () => {
+            await hands.send({ image: videoElement });
+          },
+          width: 640,
+          height: 480,
+          facingMode: 'user'
+        });
+
+        await cameraInstance.start();
+        console.log('[AeroCast] Front camera and MediaPipe Hands running.');
+      } catch (err) {
+        console.error('[Vision Init Error]:', err);
+        gestureLabel.textContent = 'Camera Blocked';
+        sslAlert.style.display = 'block';
+        sslAlertMsg.innerHTML = `<b>Error:</b> ${err.message || 'Permission denied'}.<br>If on mobile browser, make sure you accepted the self-signed certificate (Tap <i>Advanced</i> &rarr; <i>Proceed</i>).`;
+      }
+    }
+
+    if (retryCameraBtn) {
+      retryCameraBtn.addEventListener('click', () => {
+        setupVision();
+      });
+    }
+
+    // Initialize on load
+    window.addEventListener('DOMContentLoaded', () => {
+      initWebSocket();
+      setupVision();
+    });
+  </script>
+</body>
+</html>
